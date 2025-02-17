@@ -67,6 +67,8 @@ void on_view_content_button_clicked(GtkButton *button, gpointer user_data);
 void on_view_content_edit_button_clicked(GtkButton *button, gpointer user_data);
 void on_view_content_done_button_clicked(GtkButton *button, gpointer user_data);
 
+void on_cut_button_clicked(GtkButton *button, gpointer user_data);
+
 int main(int argc, char *argv[]) {
     gtk_init(&argc, &argv);
 
@@ -177,6 +179,9 @@ int main(int argc, char *argv[]) {
     
     GtkWidget *view_content_button = gtk_button_new_with_label("👁️ Ver contido");
     gtk_box_pack_start(GTK_BOX(hbox_left), view_content_button, FALSE, FALSE, 0);
+    
+    GtkWidget *cut_button = gtk_button_new_with_label("✂️ Recortar");
+    gtk_box_pack_start(GTK_BOX(hbox_left), cut_button, FALSE, FALSE, 0);
 
     GtkWidget *hbox_right = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_box_pack_start(GTK_BOX(hbox_main), hbox_right, FALSE, FALSE, 0);
@@ -196,6 +201,7 @@ int main(int argc, char *argv[]) {
     g_signal_connect(view_content_button, "clicked", G_CALLBACK(on_view_content_button_clicked), tree_view);
     g_signal_connect(tree_view, "row-activated", G_CALLBACK(on_tree_view_row_activated), store);
     g_signal_connect(back_button, "clicked", G_CALLBACK(on_back_button_clicked), store);
+    g_signal_connect(cut_button, "clicked", G_CALLBACK(on_cut_button_clicked), tree_view);
 
     gchar *home_directory = get_user_home_directory();
     directory_stack = g_list_prepend(directory_stack, g_strdup(home_directory));
@@ -221,80 +227,69 @@ void on_view_content_button_clicked(GtkButton *button, gpointer user_data) {
         gchar *file_path;
         gtk_tree_model_get(model, &iter, COLUMN_PATH, &file_path, -1);
 
-        gchar *command;
-        command = g_strdup_printf("cat %s", file_path);
-
-        FILE *fp = popen(command, "r");
-        if (fp == NULL) {
-            g_free(file_path);
-            g_free(command);
-            return;
-        }
+        const gchar *mime_type = g_content_type_guess(file_path, NULL, 0, NULL);
 
         GtkWidget *dialog = gtk_dialog_new_with_buttons("Visualizando Contido",
                                                         NULL,
                                                         GTK_DIALOG_MODAL,
+                                                        "Fechar", GTK_RESPONSE_CLOSE,
                                                         NULL);
 
         GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
-        GtkWidget *scrolled_window = gtk_scrolled_window_new(NULL, NULL);
-        GtkWidget *text_view = gtk_text_view_new();
-        gtk_text_view_set_editable(GTK_TEXT_VIEW(text_view), FALSE);
 
-        gtk_container_add(GTK_CONTAINER(scrolled_window), text_view);
-        gtk_box_pack_start(GTK_BOX(content_area), scrolled_window, TRUE, TRUE, 0);
-        gtk_widget_set_size_request(scrolled_window, 900, 400);
-
-        gtk_widget_set_margin_bottom(scrolled_window, 10);
-
-        GtkWidget *button_box = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
-        gtk_box_set_spacing(GTK_BOX(button_box), 10);
-
-        GtkWidget *edit_button = gtk_button_new_with_label("Editar");
-        GtkWidget *done_button = gtk_button_new_with_label("Listo");
-        gtk_box_pack_start(GTK_BOX(button_box), edit_button, FALSE, FALSE, 0);
-        gtk_box_pack_start(GTK_BOX(button_box), done_button, FALSE, FALSE, 0);
-        gtk_box_pack_start(GTK_BOX(content_area), button_box, FALSE, FALSE, 0);
-
-        char buffer[4096];
-        GtkTextBuffer *buffer_text = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
-        GtkTextIter iter_text;
-
-        gtk_text_buffer_get_end_iter(buffer_text, &iter_text);
-
-        while (fgets(buffer, sizeof(buffer), fp) != NULL) {
-            if (g_utf8_validate(buffer, -1, NULL)) {
-                gtk_text_buffer_insert(buffer_text, &iter_text, buffer, -1);
+        if (g_str_has_prefix(mime_type, "image/")) {
+            GdkPixbuf *pixbuf = gdk_pixbuf_new_from_file(file_path, NULL);
+            if (pixbuf) {
+                GtkWidget *image = gtk_image_new_from_pixbuf(pixbuf);
+                gtk_box_pack_start(GTK_BOX(content_area), image, TRUE, TRUE, 0);
             } else {
-                gchar *utf8_text = g_convert(buffer, -1, "UTF-8", "ISO-8859-1", NULL, NULL, NULL);
-                if (utf8_text) {
-                    gtk_text_buffer_insert(buffer_text, &iter_text, utf8_text, -1);
-                    g_free(utf8_text);
+                GtkWidget *error_label = gtk_label_new("Erro ao carregar a imagem.");
+                gtk_box_pack_start(GTK_BOX(content_area), error_label, TRUE, TRUE, 0);
+            }
+        } else {
+            FILE *fp = fopen(file_path, "r");
+            if (fp == NULL) {
+                gtk_widget_destroy(dialog);
+                g_free(file_path);
+                return;
+            }
+
+            GtkWidget *scrolled_window = gtk_scrolled_window_new(NULL, NULL);
+            GtkWidget *text_view = gtk_text_view_new();
+            gtk_text_view_set_editable(GTK_TEXT_VIEW(text_view), FALSE);
+
+            gtk_container_add(GTK_CONTAINER(scrolled_window), text_view);
+            gtk_box_pack_start(GTK_BOX(content_area), scrolled_window, TRUE, TRUE, 0);
+            gtk_widget_set_size_request(scrolled_window, 900, 400);
+
+            char buffer[4096];
+            GtkTextBuffer *buffer_text = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
+            GtkTextIter iter_text;
+
+            gtk_text_buffer_get_end_iter(buffer_text, &iter_text);
+
+            while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+                if (g_utf8_validate(buffer, -1, NULL)) {
+                    gtk_text_buffer_insert(buffer_text, &iter_text, buffer, -1);
+                } else {
+                    gchar *utf8_text = g_convert(buffer, -1, "UTF-8", "ISO-8859-1", NULL, NULL, NULL);
+                    if (utf8_text) {
+                        gtk_text_buffer_insert(buffer_text, &iter_text, utf8_text, -1);
+                        g_free(utf8_text);
+                    }
                 }
             }
+
+            fclose(fp);
         }
-
-        pclose(fp);
-
-        g_object_set_data_full(G_OBJECT(edit_button), "file_path", g_strdup(file_path), g_free);
-        g_object_set_data(G_OBJECT(edit_button), "done_button", done_button);
-        g_object_set_data(G_OBJECT(done_button), "text_view", text_view);
-        g_object_set_data(G_OBJECT(done_button), "edit_button", edit_button);
-
-        g_signal_connect(edit_button, "clicked", G_CALLBACK(on_view_content_edit_button_clicked), text_view);
-        g_signal_connect(done_button, "clicked", G_CALLBACK(on_view_content_done_button_clicked), dialog);
 
         gtk_widget_show_all(dialog);
         gtk_dialog_run(GTK_DIALOG(dialog));
         gtk_widget_destroy(dialog);
 
-        g_free(command);
         g_free(file_path);
     }
 }
-
-
-
 
 void on_view_content_edit_button_clicked(GtkButton *button, gpointer user_data) {
     GtkTextView *text_view = GTK_TEXT_VIEW(user_data);
@@ -822,9 +817,6 @@ void on_sort_by_size_toggled(GtkCheckMenuItem *menuitem, gpointer user_data) {
     }
 }
 
-
-
-
 void on_about_activate(GtkMenuItem *menuitem, gpointer user_data) {
     GtkWidget *dialog = gtk_dialog_new_with_buttons("Sobre Matche",
                                                     NULL,
@@ -972,6 +964,59 @@ void update_progress_bar(GtkProgressBar *progress_bar, gdouble fraction) {
     while (gtk_events_pending()) gtk_main_iteration();
 }
 
+void on_cut_button_clicked(GtkButton *button, gpointer user_data) {
+    GtkTreeView *tree_view = GTK_TREE_VIEW(user_data);
+    GtkTreeSelection *selection = gtk_tree_view_get_selection(tree_view);
+    GtkTreeModel *model;
+    GtkTreeIter iter;
+
+    if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
+        gchar *file_path;
+        gtk_tree_model_get(model, &iter, COLUMN_PATH, &file_path, -1);
+
+        GtkWidget *dialog = gtk_file_chooser_dialog_new("Selecionar Pasta de Destino",
+                                                        GTK_WINDOW(gtk_widget_get_toplevel(GTK_WIDGET(button))),
+                                                        GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER,
+                                                        "Cancelar", GTK_RESPONSE_CANCEL,
+                                                        "Mover", GTK_RESPONSE_ACCEPT,
+                                                        NULL);
+
+        if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
+            gchar *destination_folder = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+            gchar *new_path = g_build_filename(destination_folder, g_path_get_basename(file_path), NULL);
+
+            if (rename(file_path, new_path) == 0) {
+                gtk_list_store_remove(GTK_LIST_STORE(model), &iter);
+                update_directory_list(GTK_LIST_STORE(model), destination_folder);
+
+                GtkWidget *success_dialog = gtk_message_dialog_new(GTK_WINDOW(dialog),
+                                                                   GTK_DIALOG_MODAL,
+                                                                   GTK_MESSAGE_INFO,
+                                                                   GTK_BUTTONS_OK,
+                                                                   "O ficheiro moveuse correctamente e serás redirixido a: \n%s",
+                                                                   new_path);
+                gtk_dialog_run(GTK_DIALOG(success_dialog));
+                gtk_widget_destroy(success_dialog);
+            } else {
+                GtkWidget *error_dialog = gtk_message_dialog_new(GTK_WINDOW(dialog),
+                                                                 GTK_DIALOG_MODAL,
+                                                                 GTK_MESSAGE_ERROR,
+                                                                 GTK_BUTTONS_OK,
+                                                                 "Erro ao mover o ficheiro: \n%s",
+                                                                 file_path);
+                gtk_dialog_run(GTK_DIALOG(error_dialog));
+                gtk_widget_destroy(error_dialog);
+            }
+
+            g_free(destination_folder);
+            g_free(new_path);
+        }
+
+        gtk_widget_destroy(dialog);
+        g_free(file_path);
+    }
+}
+
 gint sort_files(GtkTreeModel *model, GtkTreeIter *a, GtkTreeIter *b, gpointer user_data) {
     gint result = 0;
     switch (sort_column_id) {
@@ -1003,4 +1048,3 @@ gint sort_files(GtkTreeModel *model, GtkTreeIter *a, GtkTreeIter *b, gpointer us
     }
     return (sort_type == GTK_SORT_ASCENDING) ? result : -result;
 }
-
