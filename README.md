@@ -16,4 +16,5 @@ Asegúrate de ter as bibliotecas necesarias para compilar este programa. A lista
 
 ### Captura de Pantalla (Screenshot)
 
-![Matche Desktop](https://i.postimg.cc/8cnkxbqW/matche-desktop.png)
+![Matche Desktop | Páxina de inicio](https://i.postimg.cc/8cnkxbqW/matche-desktop.png)
+![Matche Desktop | Visualizando Contido](https://i.postimg.cc/WpKvLtdM/matche-desktop-visualizando-contido.png)
